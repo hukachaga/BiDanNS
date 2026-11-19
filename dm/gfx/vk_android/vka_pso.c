@@ -1314,6 +1314,8 @@ static void busy_wait(gval *g) {
 typedef struct as_job { struct as_job *next; gval *g; size_t len; vka_shader *sh[VKA_NSTAGE]; vka_layout lay; vka_gkey k; uint64_t t0, cost; int cs; uint64_t umask, smask; } as_job;   // umask, smask: a compute job's retyped images (cs_obtain)
 static as_job *g_as_head, **g_as_tail = &g_as_head; static pthread_mutex_t g_as_mu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t g_as_cv = PTHREAD_COND_INITIALIZER;
 static _Atomic uint64_t g_as_queued, g_as_made, g_as_skips, g_as_ns, g_as_lat_max_ns; static _Atomic int g_as_depth, g_as_depth_max;
+static _Atomic int g_csw_busy;   // a compute compile a dispatch waits for, running on its own thread (DM_VK_CS_WAIT_MS, csw_wait)
+static _Atomic uint64_t g_csw_n, g_csw_late, g_csw_ns;   // dispatches that waited, those whose pipeline was not made in time, the frame's time waiting
 // The queue's order (vka_psogate.h vkpg_take_oldest): the job of least predicted cost first, the oldest in its turn. DM_VK_PSO_ORDER=0 (restart): arrival order, as
 // before 2026-11-11. DM_VK_PSO_FAIR_MS (restart, 2000; 0 never): how long the oldest job waits before it takes turns with the cheapest. Under g_as_mu: g_as_credit (ns)
 static int g_as_order = -1; static uint64_t g_as_fair_ns; static int64_t g_as_credit; static uint64_t g_as_cheap_n, g_as_old_n, g_as_lat_cheap_ns, g_as_lat_old_ns;
@@ -1392,12 +1394,14 @@ void vka_pso_async_line(char *out, size_t n) {
     pthread_mutex_unlock(&g_as_mu);
     snprintf(out, n, "asynchronous: %llu queued, %llu made (%.0f ms in all, longest wait from the miss %.0f ms), deepest queue %d, draws skipped waiting %llu; "
              "background compiles %d at once (%s), their gate held the frame's %.0f ms and the speculative ones %.0f ms; "
-             "taken %s: %llu cheapest (mean wait %.0f ms), %llu oldest (mean wait %.0f ms)",
+             "taken %s: %llu cheapest (mean wait %.0f ms), %llu oldest (mean wait %.0f ms); "
+             "compute dispatches that waited for their pipeline %llu, %llu of them not made in time, %.0f ms in all (DM_VK_CS_WAIT_MS)",
              (unsigned long long)atomic_load(&g_as_queued), (unsigned long long)atomic_load(&g_as_made), atomic_load(&g_as_ns) / 1e6, atomic_load(&g_as_lat_max_ns) / 1e6,
              atomic_load(&g_as_depth_max), (unsigned long long)atomic_load(&g_as_skips), atomic_load(&g_gate_slots), pso_overlap() ? "ungated: DM_VK_PREWARM_OVERLAP=1" : "by memory, DM_VK_PSO_SLOTS",
              atomic_load(&g_gate_frame_wait_ns) / 1e6, atomic_load(&g_gate_spec_wait_ns) / 1e6,
              g_as_order ? "least cost first, the oldest in turn (DM_VK_PSO_ORDER)" : "in arrival order (DM_VK_PSO_ORDER=0)",
-             (unsigned long long)cn, cl, (unsigned long long)on, ol);
+             (unsigned long long)cn, cl, (unsigned long long)on, ol,
+             (unsigned long long)atomic_load(&g_csw_n), (unsigned long long)atomic_load(&g_csw_late), atomic_load(&g_csw_ns) / 1e6);
 }
 static gval *gfx_obtain(const gkey_full *fk, uint64_t h, size_t len, vka_shader *const sh[VKA_NSTAGE], const vka_layout *lay, const vka_gkey *k, int prewarm, int *made) {
     *made = 0;
@@ -1513,7 +1517,7 @@ typedef struct { vka_shader *cs; VkPipelineLayout layout; uint64_t umask, smask;
 static kmap g_cs = {.klen = sizeof(ckey)};
 // DM_VK_CS_ASYNC (live; default 1, effective only with DM_VK_PSO_ASYNC threads; 0 = the frame waits): a compute pipeline a dispatch needs and the map lacks is made on the
 // asynchronous threads (as_main, the graphics misses' queue and its order: least predicted cost first, a .heavy shader last, DM_VK_PSO_ORDER), its dispatches skipped until
-// it is there, as the graphics misses' draws are. With pipelineCreationCacheControl the frame path first asks the pipeline cache alone (FAIL_ON_PIPELINE_COMPILE_REQUIRED):
+// it is there, as the graphics misses' draws are (unless it is made within DM_VK_CS_WAIT_MS, csw_wait below). With pipelineCreationCacheControl the frame path first asks the pipeline cache alone (FAIL_ON_PIPELINE_COMPILE_REQUIRED):
 // a pipeline an earlier run made costs no skip. Until 2026-11-15 compute pipelines were always made on the frame path: Ocarina of Time's effect shaders (3,587 compute
 // programs in cs_effect.bin, too many to prewarm them all) took 3.5-4.4 s each on Qualcomm's driver the first time an effect appeared (9e52219432f52a98, the Deku Seed
 // shot: a 3.7 s frame mid-play). A skipped dispatch leaves its outputs as they were: a particle effect is missing or frozen for those frames; work the game keeps (a
@@ -1530,6 +1534,61 @@ static void cs_queue(gval *g, vka_shader *cs, const vka_layout *lay, VkShaderMod
     while (d > m && !atomic_compare_exchange_weak(&g_as_depth_max, &m, d)) {}
     atomic_fetch_add(&g_as_queued, 1);
     pthread_mutex_lock(&g_as_mu); *g_as_tail = j; g_as_tail = &j->next; pthread_cond_signal(&g_as_cv); pthread_mutex_unlock(&g_as_mu);
+}
+// DM_VK_CS_WAIT_MS (live; default 150; 0 = no wait: the dispatch is skipped at once, as before 2026-11-19): with DM_VK_CS_ASYNC, a dispatch whose compute
+// pipeline neither the map nor the pipeline cache has waits up to this long for it before it is skipped. A skipped dispatch is lost for good when the game keeps what it
+// wrote: Fire Emblem Fortune's Weave does compute work once as a scene loads, and on a cold start (no pipeline cache) the first dialogue scene's sky stayed black, with the
+// far hills and trees, until a restart with the cache warm (Thor, Turnip, 2026-11-18; DM_VK_CS_ASYNC=0 drew it right in the same cold start). The compiles there took
+// 50-70 ms, while the slow ones the queue is for take seconds (Ocarina of Time's effects 3.5-4.4 s on Qualcomm's driver, Pokopia's 1-2.5 s on Turnip): those still cost
+// the frame no more than the wait, then their dispatches are skipped until made, as before. The compile starts at once on a thread of its own, outside the queue and the gate
+// (a queued job could wait behind a graphics compile of seconds on Turnip's one slot): the same one-beside-the-background compiles that compute misses on the frame path
+// were before 2026-11-15. One at a time: while one runs past its wait, a further miss goes to the queue and its dispatches are skipped
+// late: set under g_mu by a waiter that gave up while g was still busy (the thread then frees the slot); refs: the waiter's and the thread's
+typedef struct { gval *g; vka_shader *cs; vka_layout lay; VkShaderModule csm; uint64_t umask, smask; int late; _Atomic int refs; } csw_job;
+static void csw_put(csw_job *j) { if (atomic_fetch_sub(&j->refs, 1) == 1) free(j); }
+static void *csw_main(void *a) {
+    csw_job *j = a;
+    pthread_setname_np(pthread_self(), "vk-cswait"); vka_fp_host("vk-cswait");
+    cs_build(j->g, j->cs, &j->lay, j->csm, j->umask, j->smask, 0, 1);   // (async: its time is not the frame's; the wait counts it, csw_wait)
+    // The slot is freed by whoever learns last that the compile is over: a waiter that saw g made frees it at once, so its next miss can start a compile (until
+    // 2026-11-19's phone run this thread freed it after publishing g, and a miss right after an in-time compile found the slot taken and was skipped); a waiter that gave
+    // up (late, set under g_mu before this publish could take it) leaves it to this thread
+    pthread_mutex_lock(&g_mu); int late = j->late; pthread_mutex_unlock(&g_mu);
+    if (late) atomic_store(&g_csw_busy, 0);
+    csw_put(j);
+    return NULL;
+}
+// The compile of g (busy, just put in the map) on its own thread, and the wait of up to ms for it: 1 made (or refused) in time, 0 still being made (the dispatch is
+// skipped), -1 not started (another waited compile still runs, or no thread): the caller queues it
+static int csw_wait(gval *g, vka_shader *cs, const vka_layout *lay, VkShaderModule csm, uint64_t umask, uint64_t smask, int ms) {
+    int z = 0;
+    if (!atomic_compare_exchange_strong(&g_csw_busy, &z, 1)) return -1;
+    csw_job *j = malloc(sizeof *j);
+    if (!j) { atomic_store(&g_csw_busy, 0); return -1; }
+    *j = (csw_job){g, cs, *lay, csm, umask, smask, 0, 2};
+    uint64_t t0 = now_ns();
+    pthread_t th;
+    if (vka_compiler_thread(&th, csw_main, j)) { free(j); atomic_store(&g_csw_busy, 0); return -1; }
+    pthread_detach(th);
+    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl);
+    uint64_t ns = (uint64_t)dl.tv_nsec + (uint64_t)ms * 1000000ull;
+    dl.tv_sec += (time_t)(ns / 1000000000ull); dl.tv_nsec = (long)(ns % 1000000000ull);
+    pthread_mutex_lock(&g_mu);
+    while (__atomic_load_n(&g->busy, __ATOMIC_ACQUIRE)) if (pthread_cond_timedwait(&g_busy_cv, &g_mu, &dl)) break;
+    int done = !__atomic_load_n(&g->busy, __ATOMIC_ACQUIRE);
+    if (!done) j->late = 1;   // (under g_mu: the thread reads it after it publishes g)
+    uint64_t dt = now_ns() - t0;
+    g_create_ns += dt;   // (the frame's time: the [longframe] line's pipelines)
+    pthread_mutex_unlock(&g_mu);
+    if (done) atomic_store(&g_csw_busy, 0);
+    csw_put(j);
+    atomic_fetch_add(&g_csw_n, 1); atomic_fetch_add(&g_csw_ns, dt);
+    if (done) { static _Atomic int n; if (atomic_fetch_add(&n, 1) < 16) VLOG("compute pipeline %016llx made in %.0f ms while its dispatch waited (DM_VK_CS_WAIT_MS)", (unsigned long long)cs->key, dt / 1e6); }
+    else {
+        atomic_fetch_add(&g_csw_late, 1);
+        static _Atomic int n; if (atomic_fetch_add(&n, 1) < 16) VLOG("compute pipeline %016llx not made in %d ms (DM_VK_CS_WAIT_MS): its dispatches are skipped until it is", (unsigned long long)cs->key, ms);
+    }
+    return done;
 }
 static VkPipeline cs_obtain(vka_shader *cs, const vka_layout *lay, int prewarm, int *made, uint64_t umask, uint64_t smask, int frame) {
     *made = 0; vka_pso_wait = 0;
@@ -1573,6 +1632,10 @@ static VkPipeline cs_obtain(vka_shader *cs, const vka_layout *lay, int prewarm, 
             pthread_mutex_unlock(&g_mu);
             if (p) { pw_note_cs(cs, umask, smask); return p; }
         }
+        int wms = VKA_ENV("DM_VK_CS_WAIT_MS", 150);
+        int w = wms > 0 ? csw_wait(g, cs, lay, csm, umask, smask, wms) : -1;
+        if (w > 0) return __atomic_load_n(&g->p, __ATOMIC_ACQUIRE);   // (made in time; NULL: refused, cs_build logged it)
+        if (w == 0) { atomic_fetch_add_explicit(&g_as_skips, 1, memory_order_relaxed); vka_pso_wait = 1; return VK_NULL_HANDLE; }   // still being made on its thread
         cs_queue(g, cs, lay, csm, umask, smask);
         atomic_fetch_add_explicit(&g_as_skips, 1, memory_order_relaxed); vka_pso_wait = 1;
         return VK_NULL_HANDLE;

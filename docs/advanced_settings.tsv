@@ -476,6 +476,7 @@ DM_VK_CLASSIC_RP	advanced	Performance	Classic render passes		toggle			game		Game
 DM_VK_COALESCE_PCT	developer	Graphics			text			both							
 DM_VK_CS_ASYNC	developer	Graphics			text			both							
 DM_VK_CS_SHARED_OVER	developer	Diagnostics			text			both							
+DM_VK_CS_WAIT_MS	developer	Graphics			text			both							
 DM_VK_DEVICE_FAULT	developer	Graphics			text			both							
 DM_VK_DISPATCH_LOG	developer	Diagnostics			text			both							
 DM_VK_DISPATCH_ORDER	developer	Graphics			text			both							
