@@ -16,7 +16,7 @@ Este arquivo reúne o que fizemos no BigDanNS e que pode servir ao Banana Native
 | A | Issue (ideia / desenvolvimento) | Leitura direta com recálculo nos vertex shaders (Turnip): Zelda 9,8 → 18,8 fps na cidade do castelo; o `cache_raw_loads` não cobre o helper de 128 bits | **publicada: [#505](https://git.eden-emu.dev/moceure/BananaNative/issues/505)** (2026-11-19) |
 | B | Issue (bug) | `[RED] save commit: cannot clear … errno=13` repetido a cada commit: 2,4 milhões de linhas, log de 457 MB, jogo travando | **publicada: [#506](https://git.eden-emu.dev/moceure/BananaNative/issues/506)** (2026-11-19) |
 | C | Comentário na PR #83 | O Turnip Mesa 27 não tem a opção `fp16` no `TU_DEBUG` | texto pronto |
-| D | PR | O próprio passe, `replay_raw_loads` em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | **pronto** no ramo `replay-raw-loads` (sobre o `android` 9c98a63b), medido no Konkr (igual à primeira versão: 17,0 fps parado na vila, mesma imagem); falta publicar |
+| D | PR | O próprio passe, `replay_raw_loads` em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | **publicado: [#515](https://git.eden-emu.dev/moceure/BananaNative/pulls/515)** (2026-11-19), do ramo `replay-raw-loads` do fork hukachaga/BananaNative; aviso na #505 |
 | E | PR | Vida infinita do Zelda: segurar o handle de vida do Link | precisa virar uma linha do perfil (`game.tsv`) em vez de `#define` |
 
 A e B foram publicadas. A D vem depois que eles responderem à A. Cada envio é público, com o nome da sua conta do git.eden-emu.dev.
