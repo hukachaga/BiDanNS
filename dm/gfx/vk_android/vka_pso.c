@@ -1517,7 +1517,7 @@ static kmap g_cs = {.klen = sizeof(ckey)};
 // a pipeline an earlier run made costs no skip. Until 2026-11-15 compute pipelines were always made on the frame path: Ocarina of Time's effect shaders (3,587 compute
 // programs in cs_effect.bin, too many to prewarm them all) took 3.5-4.4 s each on Qualcomm's driver the first time an effect appeared (9e52219432f52a98, the Deku Seed
 // shot: a 3.7 s frame mid-play). A skipped dispatch leaves its outputs as they were: a particle effect is missing or frozen for those frames; work the game keeps (a
-// buffer written once, indirect arguments) stays stale until dispatched again. Pipelines with retyped images (umask / smask, vka_draw.c img_retype) go the same way: their
+// buffer written once, indirect arguments) stays stale until dispatched again. Pipelines with retyped images (umask / smask, vka_draw.c cs_pipe) go the same way: their
 // dispatches are skipped until they are made, never run with the base pipeline (which would read the integer texels as floats). Until 2026-11-18 they were made on the
 // frame path, and the base pipeline that prewarm or this queue had made was never dispatched: Pokémon Pokopia's particle and light compute shaders (6bef3d23a8ddeafd,
 // af8f64d9f5542ef2 and others, 1-2.5 s each on Turnip) froze the game for about 5 s twice in its first minutes, every run (their records now carry the masks: pw_note_cs)

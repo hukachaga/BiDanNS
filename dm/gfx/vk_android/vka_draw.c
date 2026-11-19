@@ -2777,25 +2777,33 @@ int vka_is_ndve_key(uint64_t k) {
 // through R32_UINT texture views, agl_ndsr_vr_light a335c1db6270c355): on the Switch the shader's registers are written as the bound format's integers, bit for bit. The
 // translator types such an image float (its format is not in the shader facts), and a float view of the same size in its place (vka_tex.c class_twin) converts the bits as
 // floats. So the dispatch uses a pipeline whose module has those images retyped to the texture's class (vka_shader_img_module), and their records ask for views of that class.
-// From the walk (walk_all, just before); the base pipeline p when nothing is retyped or the module cannot be made; VK_NULL_HANDLE while the retyped pipeline is made in the
-// background (vka_pso_wait set: the caller skips the dispatch). DM_VK_IMG_RETYPE=0: never (the class twin views, as before)
-static VkPipeline img_retype(vka_shader *cs, const vka_layout *lay, VkPipeline p) {
-    if (!VKA_ENV("DM_VK_IMG_RETYPE", 1)) return p;
-    vka_res *r = g_wk.r[5]; uint64_t um = 0, sm = 0, fm = 0;
-    for (int i = 0; i < g_wk.n[5]; i++) {
-        int img = r[i].what == VKA_R_IMG && r[i].desc == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        int tex = r[i].what == VKA_R_TEX && (r[i].desc == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || r[i].desc == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);   // (a texture: its fetches and samples)
-        if (!(img || tex) || r[i].binding >= 64 || (r[i].dim & (DMSH_VK_DIM_SINT | DMSH_VK_DIM_UINT))) continue;
-        int c = r[i].tid ? vka_tex_id_class_rec(r[i].tid) : 0; uint64_t bit = 1ull << r[i].binding;
-        if (r[i].elem) c = 0;   // (an array binding keeps its float type)
-        if (c == 1) um |= bit; else if (c == 2) sm |= bit; else fm |= bit;
+// From the walk (walk_all, just before). The dispatch's one pipeline: the retyped one when some image is retyped, else (or when the retyped module cannot be made) the base
+// one; VK_NULL_HANDLE while the one it needs is made in the background (vka_pso_wait set: the caller skips the dispatch). Only that pipeline is asked for: until 2026-11-19
+// the base pipeline was obtained first and the retyped one after it, so a dispatch with retyped images had its base pipeline made too, never dispatched, and on the
+// frame path (DM_VK_CS_ASYNC) its retyped pipeline was queued only once the base one was there: two compiles in a row before a first-use effect showed (Pokemon Pokopia on
+// Turnip v32: 4fb03a033366f0b2 1196 ms, then 1183 ms). DM_VK_IMG_RETYPE=0: never retyped (the class twin views, as before)
+static VkPipeline cs_pipe(vka_shader *cs, const vka_layout *lay) {
+    uint64_t um = 0, sm = 0, fm = 0; vka_res *r = g_wk.r[5];
+    if (VKA_ENV("DM_VK_IMG_RETYPE", 1)) {
+        for (int i = 0; i < g_wk.n[5]; i++) {
+            int img = r[i].what == VKA_R_IMG && r[i].desc == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            int tex = r[i].what == VKA_R_TEX && (r[i].desc == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || r[i].desc == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);   // (a texture: its fetches and samples)
+            if (!(img || tex) || r[i].binding >= 64 || (r[i].dim & (DMSH_VK_DIM_SINT | DMSH_VK_DIM_UINT))) continue;
+            int c = r[i].tid ? vka_tex_id_class_rec(r[i].tid) : 0; uint64_t bit = 1ull << r[i].binding;
+            if (r[i].elem) c = 0;   // (an array binding keeps its float type)
+            if (c == 1) um |= bit; else if (c == 2) sm |= bit; else fm |= bit;
+        }
+        uint64_t mixed = (um & sm) | ((um | sm) & fm); um &= ~mixed; sm &= ~mixed;   // (an array binding with elements of more than one class keeps its float type)
     }
-    uint64_t mixed = (um & sm) | ((um | sm) & fm); um &= ~mixed; sm &= ~mixed;   // (an array binding with elements of more than one class keeps its float type)
-    if (!(um | sm)) return p;
-    VkPipeline q = vka_cs_pipeline_img(cs, lay, um, sm);
-    if (!q) return vka_pso_wait ? VK_NULL_HANDLE : p;   // being made in the background (DM_VK_CS_ASYNC): the dispatch skipped, not run with the base pipeline; cannot be made: the base one
-    for (int i = 0; i < g_wk.n[5]; i++) if ((r[i].what == VKA_R_IMG || r[i].what == VKA_R_TEX) && r[i].binding < 64 && ((um | sm) >> r[i].binding & 1)) r[i].dim |= um >> r[i].binding & 1 ? DMSH_VK_DIM_UINT : DMSH_VK_DIM_SINT;
-    return q;
+    if (um | sm) {
+        VkPipeline q = vka_cs_pipeline_img(cs, lay, um, sm);
+        if (q) {
+            for (int i = 0; i < g_wk.n[5]; i++) if ((r[i].what == VKA_R_IMG || r[i].what == VKA_R_TEX) && r[i].binding < 64 && ((um | sm) >> r[i].binding & 1)) r[i].dim |= um >> r[i].binding & 1 ? DMSH_VK_DIM_UINT : DMSH_VK_DIM_SINT;
+            return q;
+        }
+        if (vka_pso_wait) return VK_NULL_HANDLE;   // being made in the background: the dispatch skipped, not run with the base pipeline
+    }
+    return vka_cs_pipeline_frame(cs, lay);   // (VK_NULL_HANDLE while being made in the background, DM_VK_CS_ASYNC: the dispatch skipped)
 }
 // ---------- FSR 1 in place of a game's neural upscaler (DM_VK_NDSR) ----------
 // AMD's EASU (and RCAS, DM_VK_NDSR_SHARP) as compute passes from the upscaler's input texture to its output image (vka_ndsr_fsr.h, dm/gfx/vk_android/fsr/): edge-adaptive
@@ -3130,9 +3138,7 @@ void vka_dispatch(vka_dstate *d, const p_dispatch *dp) {
         return;
     }
     vka_layout lay; if (!vka_layout_of(sh, 1, &lay)) SKIP("dispatch skipped: no pipeline layout");
-    VkPipeline p = vka_cs_pipeline_frame(sh[5], &lay);   // (VK_NULL_HANDLE while being made in the background, DM_VK_CS_ASYNC: the dispatch skipped)
     if (vka_nan_on()) vka_tex_watch_dispatch(sh[5]->key);
-    if (!p) { g_skipped++; if (vks_pipeline_counts(vka_pso_wait)) g_skip_dev[VKS_PIPELINE]++; return; }
     d->b.dispatch[0] = (uint32_t)dp->x; d->b.dispatch[1] = (uint32_t)dp->y; d->b.dispatch[2] = (uint32_t)dp->z; d->b.nvn2 = (uint32_t)vka_nvn2();
     VkBuffer ib = VK_NULL_HANDLE; VkDeviceSize io = 0;
     if (dp->ind && (!vka_addr(dp->ind, 12, &ib, &io, NULL) || (io & 3))) SKIPD(VKS_GUESTMEM, "indirect dispatch arguments at %#llx are not in placed guest RAM: skipped", (unsigned long long)dp->ind);
@@ -3146,9 +3152,9 @@ void vka_dispatch(vka_dstate *d, const p_dispatch *dp) {
     }
     c0_at c0 = {0};
     walk_all(d, sh);
+    VkPipeline p = cs_pipe(sh[5], &lay);   // (from the walk: the retyped pipeline or the base one, only the one dispatched)
+    if (!p) { g_skipped++; if (vks_pipeline_counts(vka_pso_wait)) g_skip_dev[VKS_PIPELINE]++; return; }
     if (g_do_nk || g_do_all) dobj_note(sh[5]->key, g_wk.r[5], g_wk.n[5]);   // DM_VK_DISP_OBJ (g_do_nk -1: not read yet)
-    p = img_retype(sh[5], &lay, p);
-    if (!p) { g_skipped++; if (vks_pipeline_counts(vka_pso_wait)) g_skip_dev[VKS_PIPELINE]++; return; }   // (its retyped pipeline still being made, as the base one above)
     {   // DM_VK_BIND_LOG=<hex key>[,…]: the binding records of those compute shaders' dispatches (the first 12 in all) (what each binding is bound to), to follow a pass's inputs and outputs
         static _Atomic int nb; int hit = bind_log_hit(sh[5]->key, 0);
         if (hit && atomic_fetch_add(&nb, 1) < 12)

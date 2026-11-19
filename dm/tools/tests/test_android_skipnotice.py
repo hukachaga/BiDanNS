@@ -75,7 +75,7 @@ class Notice(unittest.TestCase):
         """40 % "skipped" on a cold start were draws waiting for background pipelines (DM_VK_PSO_ASYNC), counted as refused ones (phone tests 2026-11-16); the host test is t_android_skipwarn"""
         root = Path(__file__).resolve().parents[3] / 'dm/gfx/vk_android'
         draw, pso = (root / 'vka_draw.c').read_text(encoding='utf-8'), (root / 'vka_pso.c').read_text(encoding='utf-8')
-        self.assertEqual(draw.count('if (vks_pipeline_counts(vka_pso_wait)) g_skip_dev[VKS_PIPELINE]++'), 3)   # the graphics and the compute site, and the compute site's retyped pipeline (PR 463)
+        self.assertEqual(draw.count('if (vks_pipeline_counts(vka_pso_wait)) g_skip_dev[VKS_PIPELINE]++'), 2)   # the graphics and the compute site (cs_pipe: one pipeline a dispatch, the retyped or the base one; two compute sites before 2026-11-19, PR 463)
         self.assertNotIn('{ g_skipped++; g_skip_dev[VKS_PIPELINE]++; return; }', draw)
         self.assertGreaterEqual(pso.count('vka_pso_wait = 1'), 3)   # gval_use, and both ways a frame dispatch is skipped while its pipeline is made
 
