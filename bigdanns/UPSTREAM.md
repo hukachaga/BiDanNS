@@ -57,7 +57,7 @@ Every value read is the helper's: same pool, same delta. A 128-bit call checks i
 
 With K = 2 some townspeople flickered: a vertex reading three pools cycled the two slots, reached the run limit (4) and drew zeros. K = 4 with 6 runs fixed it, checked by playing in Castle Town. The pass changes 734 of the 802 vertex shaders in Ocarina of Time's library that have a pool table; 67 are skipped because their main has more than one block. All 734 pass `spirv-val --target-env vulkan1.3`. Not checked yet: Qualcomm's own driver, and other games (their raw loads are in compute shaders, per the reference entry).
 
-The fork has the pass as a standalone tool that rewrites a built library, loaded with `DM_VK_SHLIB`. It would belong in `vk_android_spv.py` after `cache_raw_loads`, which means a new `DMSH_VK_CHAIN`. Would you take it as a PR, and should it be limited to vertex shaders as here? Code: (link to the BigDanNS repository, `bigdanns/tools/specreplay_pass.py`).
+The fork has the pass as a standalone tool that rewrites a built library, loaded with `DM_VK_SHLIB`. It would belong in `vk_android_spv.py` after `cache_raw_loads`, which means a new `DMSH_VK_CHAIN`. Would you take it as a PR, and should it be limited to vertex shaders as here? I can open one with the pass in `vk_android_spv.py`, a SPIR-V interpreter test in the style of `test_vk_gmem_cache.py` and a `docs/reference/shaders.md` entry, after a run on Qualcomm's driver.
 
 ---
 
