@@ -16,7 +16,7 @@ Este arquivo reúne o que fizemos no BigDanNS e que pode servir ao Banana Native
 | A | Issue (ideia / desenvolvimento) | Leitura direta com recálculo nos vertex shaders (Turnip): Zelda 9,8 → 18,8 fps na cidade do castelo; o `cache_raw_loads` não cobre o helper de 128 bits | **publicada: [#505](https://git.eden-emu.dev/moceure/BananaNative/issues/505)** (2026-11-19) |
 | B | Issue (bug) | `[RED] save commit: cannot clear … errno=13` repetido a cada commit: 2,4 milhões de linhas, log de 457 MB, jogo travando | **publicada: [#506](https://git.eden-emu.dev/moceure/BananaNative/issues/506)** (2026-11-19) |
 | C | Comentário na PR #83 | O Turnip Mesa 27 não tem a opção `fp16` no `TU_DEBUG` | texto pronto |
-| D | PR | O próprio passe, `replay_raw_loads` em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | **pronto** no ramo `replay-raw-loads` (um commit sobre o `android` 9c98a63b); falta medir a versão final no aparelho e publicar |
+| D | PR | O próprio passe, `replay_raw_loads` em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | **pronto** no ramo `replay-raw-loads` (sobre o `android` 9c98a63b), medido no Konkr (igual à primeira versão: 17,0 fps parado na vila, mesma imagem); falta publicar |
 | E | PR | Vida infinita do Zelda: segurar o handle de vida do Link | precisa virar uma linha do perfil (`game.tsv`) em vez de `#define` |
 
 A e B foram publicadas. A D vem depois que eles responderem à A. Cada envio é público, com o nome da sua conta do git.eden-emu.dev.
@@ -123,7 +123,7 @@ Only for vertex shaders whose `main` is one block, with no opcode a rerun would 
   - The interpreter now also keeps Output variables, Private arrays and vector physical loads. `test_vk_gmem_cache.py` still passes.
 - In a clean clone against `android`: `dm/gfx/tests` has the same failures as `android` (environment), and the new tests pass. `dm/tools/tests` has the same failures plus `test_version_header_current` and `test_the_chain_is_untouched`, which pin `DMSH_VK_CHAIN` / the digest `6eaa66f9f1e4`. The header and the version are yours to bump, so the PR leaves them alone.
 - Ocarina of Time's v0.3.45 library: 734 of the 802 vertex shaders that bind the pool table change. 67 are left alone (a `main` of more than one block) and 1 (a store helper). All 734 pass `spirv-val --target-env vulkan1.3`, and every other module is byte-identical.
-- On a phone (AYANEO Pocket FIT, Adreno 750, Turnip Mesa 27.0.0-devel `git-3e8621cc0e`): @@PHONE@@
+- On a phone (AYANEO Pocket FIT, Adreno 750, Turnip Mesa 27.0.0-devel `git-3e8621cc0e`): standing in Castle Town at night (a recorded route that only loads a save, so every run sees the same scene, about 2,850 draws), two runs each, alternating with the version tested in #505: 17.0 fps both; GPU p50 54.7 / 54.9 ms (p90 61.5 / 59.9) against 54.8 / 54.5 (p90 95.5 / 71.8); `b1f06157308e3b22` 0.086 / 0.091 µs a vertex against 0.089 / 0.093 (0.266 with the pack's own library in #505). The screenshots match apart from animation.
 
 **Not run:** Qualcomm's driver on my Adreno 750 (your Odin 3 run in #505 was with the first version); other games (their raw loads are in agl's compute shader, so none are expected to change).
 

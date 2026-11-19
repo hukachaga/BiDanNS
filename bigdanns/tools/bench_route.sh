@@ -11,7 +11,7 @@ ADB="${ADB:-adb}"; A="$ADB -s ${SERIAL:?}"
 export MSYS_NO_PATHCONV=1
 F=/sdcard/Android/data/dev.nxnative.android.bigdanns/files; FS=/storage/emulated/0/Android/data/dev.nxnative.android.bigdanns/files
 G="${GAME_NUP:?set GAME_NUP to the game's .nup or folder on the phone}"
-END_FRAME=${END_FRAME:-9400}
+END_FRAME=${END_FRAME:-}   # optional: stop at this pace frame even if the route has not ended
 env=$(mktemp); cat "$W/env-0400486024DEC000.txt.base" > "$env"; echo "DM_KEYS=@$FS/${ROUTE:-rota-castelo-praca.keys}" >> "$env"
 [ -n "${BENCH_EXTRA:-}" ] && printf '%s\n' $BENCH_EXTRA >> "$env"   # extra KEY=value lines (space-separated)
 if [ -n "$ovr" ]; then
@@ -28,12 +28,13 @@ done
 f=0
 for i in $(seq 1 150); do
   f=$($A shell "grep -oE 'pace up to frame [0-9]+' '$L' | tail -1" | tr -dc 0-9)
-  [ "${f:-0}" -ge "$END_FRAME" ] && break; sleep 10
+  $A shell "grep -q 'frame steps were played' '$L'" && break   # the route's last step let go (DM_KEYS logs it)
+  [ -n "${END_FRAME:-}" ] && [ "${f:-0}" -ge "$END_FRAME" ] && break; sleep 10
 done
 echo "$label: route done at frame ${f:-?}"
 L=$($A shell "ls -t $F/logs/*.log | head -1" | tr -d '\r'); echo "log $L"
 $A shell "grep -E 'spv override|CRASH|FATAL|DEVICE_LOST' '$L' | head -3"
-sleep 8
+sleep "${SETTLE:-8}"   # after the route: let the scene settle (a route that only loads a save needs the load time)
 "$HERE/villa_test.sh" "${label}_pace" 20 | head -1
 "$HERE/villa_test.sh" "${label}_split" 14 "env DM_VK_GPUPROF_SPLIT=1" "env DM_VK_GPUPROF=60" > /dev/null
 $A shell "echo 'env DM_VK_GPUPROF=0' >> $F/ctl.txt; echo 'env DM_VK_GPUPROF_SPLIT=0' >> $F/ctl.txt"
