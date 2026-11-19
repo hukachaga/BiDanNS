@@ -65,9 +65,29 @@ Na cidade do castelo o jogo fica entre 10 e 15 fps, com 58 a 96 ms de GPU por qu
 
   Conclusão: o custo é o tamanho do código (61 cópias da rotina de busca, inlinadas), não o tempo das buscas. Fica fora do build.
 
+### Leitura direta com recálculo exato (`tools/specreplay_pass.py`): FUNCIONOU
+
+Em vez de procurar o endereço na tabela de pools a cada leitura, cada leitura confere 2 áreas já conhecidas e lê direto. Se o endereço não estiver em nenhuma, a leitura dá 0, o endereço fica guardado e uma marca de "faltou" é ligada. O `main` do shader vira um laço: quando uma passada falhou, **uma única** busca na tabela acha a área, ela entra nas áreas conhecidas e o corpo roda de novo (no máximo 4 vezes). A primeira leitura já faz essa busca, então um vértice cujas leituras caem todas numa área roda uma vez só. Cada valor lido é o mesmo que a função original lê. Só entram vertex shaders com `main` em bloco único que não escrevem em memória.
+
+- `tools/lib_specreplay.py candidates` aplica em todos os vertex shaders da biblioteca: no Zelda, 734 de 802; os 67 restantes têm `main` com desvios.
+- `tools/spv_val_dir.sh` roda o `spirv-val` em todos: 734 válidos.
+- `tools/lib_specreplay.py write` grava uma biblioteca nova, com o mesmo cabeçalho e os módulos novos anexados.
+- No app, a biblioteca nova entra com `DM_VK_SHLIB=<arquivo>` (já está em `config/env-0400486024DEC000.txt`). O pack não muda.
+
+Medido com a rota gravada (`tools/bench_route.sh`, `DM_KEYS` + `DM_REC`), praça da cidade do castelo de dia, a mesma cena (~2.450 desenhos):
+
+| | fps | GPU por quadro | personagens `b1f06157` | `e9d9c742` |
+|---|---|---|---|---|
+| original | 9,8 | 96 ms | 0,266 µs/vértice | 0,261 |
+| biblioteca BigDanNS | **18,8** | **48,6 ms** | **0,077** | **0,084** |
+
+A imagem foi conferida: personagens, multidão e casal dançando corretos.
+
 ### Próximo passo
 
-Ler essas memórias por um buffer fixo, sem procurar o endereço a cada leitura: o replay descobre antes de desenhar em qual pool estão os ossos e passa isso ao shader, e o shader lê direto, sem a rotina de busca. É o caso de 17 ms medido pelos autores.
+- Os 67 vertex shaders com `main` em vários blocos.
+- Os pixel shaders mais pesados (`Model.Product`).
+- Passar a biblioteca nova pelo Prepare do app, para ela não depender de `DM_VK_SHLIB`.
 
 ## Licença
 

@@ -12,3 +12,4 @@ DM_OOT_SHADOW_RANGE=500
 DM_LSFG=0
 DM_VK_PSO_ASYNC=0
 DM_VK_VEGETATION=1
+DM_VK_SHLIB=/storage/emulated/0/Android/data/dev.nxnative.android.bigdanns/files/spv/dmsh_vk_bdn.lib
