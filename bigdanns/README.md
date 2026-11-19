@@ -67,7 +67,7 @@ Na cidade do castelo o jogo fica entre 10 e 15 fps, com 58 a 96 ms de GPU por qu
 
 ### Leitura direta com recálculo exato (`tools/specreplay_pass.py`): FUNCIONOU
 
-Em vez de procurar o endereço na tabela de pools a cada leitura, cada leitura confere 2 áreas já conhecidas e lê direto. Se o endereço não estiver em nenhuma, a leitura dá 0, o endereço fica guardado e uma marca de "faltou" é ligada. O `main` do shader vira um laço: quando uma passada falhou, **uma única** busca na tabela acha a área, ela entra nas áreas conhecidas e o corpo roda de novo (no máximo 4 vezes). A primeira leitura já faz essa busca, então um vértice cujas leituras caem todas numa área roda uma vez só. Cada valor lido é o mesmo que a função original lê. Só entram vertex shaders com `main` em bloco único que não escrevem em memória.
+Em vez de procurar o endereço na tabela de pools a cada leitura, cada leitura confere 4 áreas já conhecidas (com 2, alguns personagens que leem de 3 áreas piscavam na cidade do castelo) e lê direto. Se o endereço não estiver em nenhuma, a leitura dá 0, o endereço fica guardado e uma marca de "faltou" é ligada. O `main` do shader vira um laço: quando uma passada falhou, **uma única** busca na tabela acha a área, ela entra nas áreas conhecidas e o corpo roda de novo (no máximo 6 vezes). A primeira leitura já faz essa busca, então um vértice cujas leituras caem todas numa área roda uma vez só. Cada valor lido é o mesmo que a função original lê. Só entram vertex shaders com `main` em bloco único que não escrevem em memória.
 
 - `tools/lib_specreplay.py candidates` aplica em todos os vertex shaders da biblioteca: no Zelda, 734 de 802; os 67 restantes têm `main` com desvios.
 - `tools/spv_val_dir.sh` roda o `spirv-val` em todos: 734 válidos.

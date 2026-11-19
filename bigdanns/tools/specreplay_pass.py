@@ -5,7 +5,8 @@ through the pool table, the replay's table of the game's memory pools (start, en
 Ocarina of Time's character vertex shader b1f06157308e3b22 kept 70 of them after cache_raw_loads, and Turnip's ir3 spills around them.
 
 Here every call site becomes a few compares and one load, with no search:
-  - K kept entries (Private: start, end, delta, 6 words each). A site whose address lies in one of them reads it there (address + delta).
+  - K kept entries (Private: start, end, delta, 6 words each; K = 4, SR_K): with 2, a character reading 3 pools cycled them, hit MAX_RUNS and drew zeros
+    (objects flickering in Castle Town); 4 cost 0.088 against 0.077 us a vertex. A site whose address lies in one of them reads it there (address + delta).
   - A site that misses reads the table's sink instead, gives 0, records its address (the first miss of the run) and sets a flag.
   - main runs the old body (now function B) in a loop: after a run that missed, one table search (one cache function of cache_raw_loads, the only copy of the
     search left) finds the entry of the recorded address, which goes into the next kept slot, and the body runs again. An address in no entry is remembered (its
@@ -28,7 +29,7 @@ OP_FUNCTION_PARAMETER, OP_FUNCTION_CALL, OP_CONVERT_U_TO_PTR = 55, 57, 120
 OP_IADD, OP_ULT, OP_ULE, OP_IEQ, OP_INE, OP_LAND, OP_LOR, OP_LNOT, OP_BAND = 128, 176, 178, 170, 171, 167, 166, 168, 199
 OP_SEL_MERGE, OP_LOOP_MERGE, OP_BRANCH, OP_BRANCH_COND, OP_COMPOSITE_CONSTRUCT, OP_CONSTANT_NULL = 247, 246, 249, 250, 80, 46
 SC_OUTPUT_, SC_PHYS = 3, 5349
-MAX_RUNS = 4
+MAX_RUNS = int(os.environ.get("SR_MAX_RUNS", "6"))
 MEM_ALIGNED4 = [2, 4]
 # body ops that a rerun would repeat with an effect: barriers, atomics, image writes, kill / demote, emits, ray / mesh ops (vk_android_spv._RUN_BREAKERS) and
 # any call that is not a raw load helper
@@ -84,7 +85,7 @@ def classify(m, f, table, u32, v4):
     return ('word', h) if h else None
 
 
-def transform(m, table, K=2):
+def transform(m, table, K=int(os.environ.get("SR_K", "4"))):
     """the pass on module m (its pool table variable: table) → the number of call sites rewritten; raises Skip when the module does not fit"""
     if m.model != 'vs': raise Skip('not a vertex shader')
     if m.header[1] > 0x10300: raise Skip('SPIR-V 1.4+')
