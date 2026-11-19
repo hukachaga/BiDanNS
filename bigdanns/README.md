@@ -89,6 +89,29 @@ A imagem foi conferida: personagens, multidão e casal dançando corretos.
 - Os pixel shaders mais pesados (`Model.Product`).
 - Passar a biblioteca nova pelo Prepare do app, para ela não depender de `DM_VK_SHLIB`.
 
+## Os outros jogos no BigDanNS
+
+O APK já traz os 10 jogos do Banana Native. Para trazer um jogo que está no app oficial, usando o próprio app para que os arquivos fiquem com o dono certo:
+
+```sh
+SERIAL=<adb serial> bigdanns/tools/bring_game.sh <title ID> '<.nup ou pasta do dump no aparelho>'
+SERIAL=<adb serial> BDN_WORK=<pasta de trabalho> bigdanns/tools/smoke_game.sh <title ID> '<mesmo caminho>' 90
+```
+
+O primeiro comando copia o pack e o save do oficial e importa no BigDanNS. O segundo abre o jogo e mostra no log driver, save, framegen, fps e crashes, além de tirar uma captura.
+
+Testado no Konkr em 2026-11-19, todos com Turnip TotK: Donkey Kong Bananza, Pokémon Pokopia, Mario Kart World e Star Fox chegam à tela de título com save e framegen. Na primeira abertura com um driver novo, o Pokopia leva uns 3 minutos para montar os shaders.
+
+O Lossless.dll é do jogador: aponte com `DM_LSFG_DLL=<caminho>` no `env-<title ID>.txt`, sem copiar o arquivo.
+
+## Botões no padrão Xbox (Konkr, Odin)
+
+O app novo começa com o mapeamento por posição do Switch, e no Konkr isso troca A/B e X/Y em relação às letras impressas. Para o botão marcado "A" fazer o A do Switch, use Settings › Button mapping, ou o valor salvo `pad_map`, com `BUTTON_A=A,BUTTON_B=B,BUTTON_X=X,BUTTON_Y=Y,…`.
+
+## Vida infinita (Zelda)
+
+A trapaça "Infinite Health" do perfil só escrevia nos dados do jogo, e o Link guarda a própria cópia da vida. O BigDanNS segura essa cópia com um gancho em `main+0x49e08c` (`dm/host/probe.c`, `oot_life_install`). Foi verificado levando dano: a vida voltou de 18 para 20.
+
 ## Licença
 
 nxnative é MIT. O APK com o frame generation do Lossless Scaling (o padrão) é GPL-3.0-or-later como um todo (`android/NOTICE.md`). O repositório não contém jogos, chaves nem nada extraído dos jogos.
