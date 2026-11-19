@@ -13,8 +13,8 @@ Este arquivo reúne o que fizemos no BigDanNS e que pode servir ao Banana Native
 
 | # | Tipo | Assunto | Situação |
 |---|---|---|---|
-| A | Issue (ideia / desenvolvimento) | Leitura direta com recálculo nos vertex shaders (Turnip): Zelda 9,8 → 18,8 fps na cidade do castelo; o `cache_raw_loads` não cobre o helper de 128 bits | texto pronto (abaixo) |
-| B | Issue (bug) | `[RED] save commit: cannot clear … errno=13` repetido a cada commit: 2,4 milhões de linhas, log de 457 MB, jogo travando | texto pronto |
+| A | Issue (ideia / desenvolvimento) | Leitura direta com recálculo nos vertex shaders (Turnip): Zelda 9,8 → 18,8 fps na cidade do castelo; o `cache_raw_loads` não cobre o helper de 128 bits | **publicada: [#505](https://git.eden-emu.dev/moceure/BananaNative/issues/505)** (2026-11-19) |
+| B | Issue (bug) | `[RED] save commit: cannot clear … errno=13` repetido a cada commit: 2,4 milhões de linhas, log de 457 MB, jogo travando | **publicada: [#506](https://git.eden-emu.dev/moceure/BananaNative/issues/506)** (2026-11-19) |
 | C | Comentário na PR #83 | O Turnip Mesa 27 não tem a opção `fp16` no `TU_DEBUG` | texto pronto |
 | D | PR (depois da resposta à A) | O próprio passe, em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | código no BigDanNS; antes, rodar os testes deles e testar no driver Qualcomm |
 | E | PR | Vida infinita do Zelda: segurar o handle de vida do Link | precisa virar uma linha do perfil (`game.tsv`) em vez de `#define` |
