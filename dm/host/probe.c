@@ -767,10 +767,42 @@ static void drs_install(void) {
     const char *e = getenv("DM_DRS"); int lo = 0, hi = 0; if (e) sscanf(e, "%d,%d", &lo, &hi);
     nxhost_drs_set(lo, hi);   // (also the game's own: its range clamps the controller's own picks)
 }
+// BigDanNS: Ocarina of Time's Infinite Health cheat made to hold. The cheat writes life = max life into game data (gmd's Int record, +0x1c) every pass, but Link's
+// status object keeps its own GameDataInt handles and pushes them into game data each frame: [owner+0x1c10] the life handle (value +8, key +0xc = 0x31ab5580,
+// PlayerStatus.CurrentLife's hash), [owner+0x1c18] the max life handle (key 0xfbe01da1); damage lowers the handle's value, so the cheat's write was overwritten
+// the next frame and a scene's damage still added up to death. Found on main build e0f3ccfaf50065ae: a write watch on the game data write queue
+// (main+0x163c5c, the queue store of setInt main+0x163b70) and a probe on its handle wrapper main+0x163b20 (x0 = the handle; its caller main+0x49e09c, a virtual
+// call on [x19+0x1c10]). Here a probe at main+0x49e08c (ldr x0, [x19, #0x1c10], just before that push; x16 is dead after the blr before it) sets the life
+// handle's value to the max life handle's while a cheat whose name starts with "Infinite Health" is on: Link's own copy never drops, nor does game data.
+// Still open: damage of one frame that reaches max life at once (the death check may run before the push).
+#define OOT_LIFE_BUILD "e0f3ccfaf50065ae"
+#define OOT_LIFE_SITE 0x49e08cull
+int dm_cheats_ncheats(void); const char *dm_cheat_name_at(int i); int dm_cheat_on_at(int i);
+static int oot_life_wanted(void) {
+    for (int i = 0, n = dm_cheats_ncheats(); i < n; i++) if (!strncmp(dm_cheat_name_at(i), "Infinite Health", 15) && dm_cheat_on_at(i)) return 1;
+    return 0;
+}
+static void oot_life_cb(ucontext_t *uc) {   // (game thread, once a frame for Link's status object)
+    if (!oot_life_wanted()) return;
+    uint64_t o = PLAT_UC_X(uc, 19), h = 0, mh = 0; uint32_t hk = 0, mk = 0, v = 0, mv = 0;
+    if (plat_mem_read(o + 0x1c10, &h, 8) || plat_mem_read(o + 0x1c18, &mh, 8) || !h || !mh) return;
+    if (plat_mem_read(h + 0xc, &hk, 4) || plat_mem_read(mh + 0xc, &mk, 4) || hk != 0x31ab5580u || mk != 0xfbe01da1u) return;
+    if (plat_mem_read(h + 8, &v, 4) || plat_mem_read(mh + 8, &mv, 4) || !mv || v == mv) return;
+    uint32_t *p = (uint32_t *)(uintptr_t)(h + 8); dm_guest_write_prepare(p, 4); *p = mv;
+    static _Atomic int n; if (atomic_fetch_add(&n, 1) < 5) LOG("cheats: Infinite Health held Link's life at %u (it was %u)", mv, v);
+}
+static void oot_life_install(void) {
+    module_t *m = NULL; for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
+    if (!m || strncmp(m->build_id, OOT_LIFE_BUILD, strlen(OOT_LIFE_BUILD))) return;   // another game or build
+    if (*(uint32_t *)(m->base + OOT_LIFE_SITE) != 0xf94e0a60u) { LOG("[RED] cheats: main+%#llx is not ldr x0, [x19, #0x1c10]: Infinite Health stays game data only", OOT_LIFE_SITE); return; }
+    probe_add(m, OOT_LIFE_SITE, -1, oot_life_cb);
+    LOG("cheats: Infinite Health also holds Link's own life handle (main+%#llx, BigDanNS)", OOT_LIFE_SITE);
+}
 #endif
 void probe_install(void) {
 #if PLAT_ANDROID
     drs_install();
+    oot_life_install();
 #endif
 #if !PLAT_IOS
     crash_set_trap_hook(probe_hit);
