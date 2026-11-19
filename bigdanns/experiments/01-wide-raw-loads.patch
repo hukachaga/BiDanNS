@@ -1,0 +1,165 @@
+diff --git a/dm/gfx/tools/vk_android_spv.py b/dm/gfx/tools/vk_android_spv.py
+index 0c3ed96..5f24c11 100644
+--- a/dm/gfx/tools/vk_android_spv.py
++++ b/dm/gfx/tools/vk_android_spv.py
+@@ -1157,11 +1157,16 @@ def _raw_load_helper(m, f, tables):
+         uses = [x for x in body if ptr in x[1:] and x is not cu[0]]
+         if len(uses) != 1 or uses[0][0] & 0xffff != OP_ACCESS_CHAIN or len(uses[0]) != 5 or uses[0][3] != ptr or m.consts.get(uses[0][4], (0, [1]))[1] != [0]: return None
+         member = (uses[0][1], uses[0][4]); ptr = uses[0][2]; pt = m.pointee(uses[0][1])[1]
+-    if (m.int_type(pt) or (0,))[0] != 32: return None
++    wide = None
++    if (m.op(pt) == OP_TYPE_VECTOR and m.types[pt][3] == GMEM_RUN_WORDS and member is None
++            and (m.int_type(m.types[pt][2]) or (0,))[0] == 32):
++        wide = m.types[pt][2]   # BigDanNS: a 128-bit load helper (word 0 returned, words 1-3 stored to a Private array), _raw_load_wide below
++    elif (m.int_type(pt) or (0,))[0] != 32: return None
+     uses = [x for x in body if ptr in x[1:] and x[2:3] != [ptr]]
+     if len(uses) != 1 or uses[0][0] & 0xffff != OP_LOAD or uses[0][3] != ptr: return None
+     load = uses[0]
+     defs = {x[2]: x for x in body if len(x) > 2 and (x[0] & 0xffff) not in NO_RESULT_OPS and x[0] & 0xffff != OP_LABEL}
++    if wide is not None: return _raw_load_wide(m, f, tables, body, defs, rty, params, cu[0], load, wide)
+     for x in body:
+         op = x[0] & 0xffff
+         if op in _RUN_BREAKERS or op == OP_FUNCTION_CALL or (op == OP_STORE and _store_class(m, defs, x[1]) not in (SC_FUNCTION, SC_PRIVATE)): return None
+@@ -1179,6 +1184,48 @@ def _raw_load_helper(m, f, tables):
+             'pptr': cu[0][1], 'member': member, 'mem': load[4:]}
+ 
+ 
++def _raw_load_wide(m, f, tables, body, defs, rty, params, cu, load, word):
++    """BigDanNS: the facts of a 128-bit raw load helper, the translator's form of an LDG.128 whose address was read from memory: as _raw_load_helper's, but the
++    physical pointer is a uvec4 read once; word 0 is returned (bits unchanged, or 0) and words 1, 2 and 3 are stored to elements of one Private array (or 0 there),
++    which the caller reads after the call. cache_raw_loads then reads it as a run of four words through the kept pool entry. Ocarina of Time's character vertex
++    shader b1f06157308e3b22 has 61 such calls next to 9 runs of 32-bit ones, so the earlier pass left most of its lookups (and ir3's spills) in place. Else None"""
++    for x in body:
++        op = x[0] & 0xffff
++        if op in _RUN_BREAKERS or op == OP_FUNCTION_CALL or (op == OP_STORE and _store_class(m, defs, x[1]) not in (SC_FUNCTION, SC_PRIVATE)): return None
++    chains = [x for x in body if x[0] & 0xffff == OP_ACCESS_CHAIN and x[3] in tables]
++    if not chains or len({x[3] for x in chains}) != 1 or any(len(x) != 6 or m.consts.get(x[4], (0, [1]))[1] != [0] for x in chains): return None
++    tptr = chains[0][1]
++    if m.pointee(tptr)[0] not in (SC_UNIFORM, SC_STORAGE_BUFFER) or (m.int_type(m.pointee(tptr)[1]) or (0,))[0] != 32: return None
++    a = m.function_range(f)[0]
++    def bits_of(v):
++        while v in defs and defs[v][0] & 0xffff in (OP_BITCAST, OP_COPY_OBJECT): v = defs[v][3]
++        return v
++    def lane(v):   # k when v is (bits of) CompositeExtract(load, k)
++        x = defs.get(bits_of(v))
++        return x[4] if x is not None and x[0] & 0xffff == OP_COMPOSITE_EXTRACT and len(x) == 5 and x[3] == load[2] else None
++    zero = lambda v: v in m.consts and m.consts[v][1] == [0] or any(y[0] & 0xffff == OP_CONSTANT_NULL and y[2] == v for y in m.ins[:a])
++    rets = [x[1] for x in body if x[0] & 0xffff == OP_RETURN_VALUE]
++    if not rets or any(lane(v) != 0 and not zero(v) for v in rets) or not any(lane(v) == 0 for v in rets): return None
++    priv, pty, idx = None, None, {}
++    for x in body:
++        if x[0] & 0xffff != OP_STORE or _store_class(m, defs, x[1]) != SC_PRIVATE: continue
++        ch = defs.get(x[1])
++        if ch is None and x[1] in m.vars: continue   # a Private variable of its own: the helper's hint, the entry it chose last (a guess it checks before use)
++        if ch is None or ch[0] & 0xffff != OP_ACCESS_CHAIN or len(ch) != 5 or ch[4] not in m.consts: return None
++        if priv not in (None, ch[3]) or (pty not in (None, ch[1])): return None
++        priv, pty = ch[3], ch[1]
++        k = lane(x[2])
++        if k is None:
++            if not zero(x[2]): return None
++            continue
++        if k == 0 or idx.get(k, ch[4]) != ch[4]: return None
++        idx[k] = ch[4]
++    if sorted(idx) != list(range(1, GMEM_RUN_WORDS)) or len(set(idx.values())) != GMEM_RUN_WORDS - 1: return None
++    if (m.int_type(m.pointee(pty)[1]) or (0,))[0] != 32: return None
++    return {'ret': rty, 'lo': params[0][1], 'hi': params[1][1], 'table': chains[0][3], 'tptr': tptr, 'ity': m.consts[chains[0][4]][0], 'word': word,
++            'pptr': None, 'member': None, 'mem': load[4:], 'wide': {'priv': priv, 'pty': pty, 'idx': idx, 'vptr': cu[1], 'vty': m.pointee(cu[1])[1]}}
++
++
+ def cache_raw_loads(m, tables):
+     """The GlobalToStorage raw load helpers' calls (a guest global load whose address the shader read from memory: docs/reference/shaders.md, Global memory at an
+     address loaded from memory) replaced by calls of one generated function per helper and run length: the pool table entry of the last access kept in six Private
+@@ -1225,6 +1272,9 @@ def cache_raw_loads(m, tables):
+         cur = []
+         for k, x in enumerate(body):
+             op = x[0] & 0xffff
++            if op == OP_FUNCTION_CALL and x[3] in helpers and len(x) == 6 and helpers[x[3]].get('wide'):   # BigDanNS: a 128-bit helper's call, a run of four words alone
++                if cur: runs.append((f, cur))
++                runs.append((f, [(k, x, None)])); cur = []; continue
+             if op == OP_FUNCTION_CALL and x[3] in helpers and len(x) == 6:
+                 ad = addr(x[4], x[5])
+                 if (cur and ad is not None and cur[-1][2] is not None and x[3] == cur[-1][1][3] and ad[:2] == cur[-1][2][:2] and ad[2] == cur[-1][2][2] + 4
+@@ -1236,7 +1286,8 @@ def cache_raw_loads(m, tables):
+                 if cur: runs.append((f, cur))
+                 cur = []
+         if cur: runs.append((f, cur))
+-    if sum(len(c) for _, c in runs) < GMEM_CACHE_MIN_CALLS: return 0
++    words = lambda c: GMEM_RUN_WORDS if helpers[c[0][1][3]].get('wide') else len(c)   # BigDanNS: a 128-bit helper's call reads four
++    if sum(words(c) for _, c in runs) < GMEM_CACHE_MIN_CALLS: return 0
+     # declarations
+     bty = m.add_type(OP_TYPE_BOOL)
+     u32 = m.add_type(OP_TYPE_INT, 32, 0)
+@@ -1258,7 +1309,8 @@ def cache_raw_loads(m, tables):
+         m.entry = m.entry + new_globals; m.entry[0] = len(m.entry) << 16 | OP_ENTRY_POINT
+         m.ins[next(k for k, x in enumerate(m.ins) if x[0] & 0xffff == OP_ENTRY_POINT)] = m.entry
+     for f, h in helpers.items():
+-        for n in sorted({len(c) for g, c in runs if c[0][1][3] == f}):
++        if h.get('wide') and h['pptr'] is None: h['pptr'] = m.add_type(OP_TYPE_POINTER, SC_PHYSICAL_STORAGE_BUFFER, h['word'])   # its words read one at a time
++        for n in sorted({words(c) for g, c in runs if c[0][1][3] == f}):
+             gfns[f, n] = _cached_load_fn(m, h, n, caches[h['table']], f, dict(bool=bty, u32=u32, v2=v2, v4=v4, u64=u64, z4=z4, U=U))
+     # the call sites
+     done = 0
+@@ -1270,8 +1322,17 @@ def cache_raw_loads(m, tables):
+         body = m.ins[a:e + 1]
+         rep = {}
+         for c in mine:
+-            k0, x0, _ = c[0]; n = len(c); r = m.new_id()
++            k0, x0, _ = c[0]; n = words(c); r = m.new_id()
+             new = [[6 << 16 | OP_FUNCTION_CALL, v4, r, gfns[x0[3], n], x0[4], x0[5]]]
++            wd = helpers[x0[3]].get('wide')
++            if wd:   # BigDanNS
++                w = m.new_id()
++                new += [[5 << 16 | OP_COMPOSITE_EXTRACT, u32, w, r, 0], [4 << 16 | (OP_COPY_OBJECT if x0[1] == u32 else OP_BITCAST), x0[1], x0[2], w]]
++                for j in range(1, GMEM_RUN_WORDS):
++                    w, p = m.new_id(), m.new_id()
++                    new += [[5 << 16 | OP_COMPOSITE_EXTRACT, u32, w, r, j], [5 << 16 | OP_ACCESS_CHAIN, wd['pty'], p, wd['priv'], wd['idx'][j]], [3 << 16 | OP_STORE, p, w]]
++                rep[k0] = new; done += n
++                continue
+             for j, (_, x, _) in enumerate(c):
+                 w = m.new_id()
+                 new += [[5 << 16 | OP_COMPOSITE_EXTRACT, u32, w, r, j], [4 << 16 | (OP_COPY_OBJECT if x[1] == u32 else OP_BITCAST), x[1], x[2], w]]
+@@ -1316,6 +1377,12 @@ def _cached_load_fn(m, h, n, cache, helper, T):
+         p = val(OP_CONVERT_U_TO_PTR, h['pptr'], val(OP_BITCAST, u64, val(OP_COMPOSITE_CONSTRUCT, v2, alo, ahi)))
+         if h['member']: p = val(OP_ACCESS_CHAIN, h['member'][0], p, h['member'][1])
+         return cast(val(OP_LOAD, h['word'], p, *h['mem']), h['word'], u32)
++    # BigDanNS: a 128-bit helper's run reads its four words as one uvec4 (as the helper did) and looks its base up once on a miss: four lookups and four loads made the
++    # function larger than the helper it replaced (Ocarina of Time b1f06157308e3b22 on Turnip: 0.17 -> 0.28 us a vertex with per-word reads)
++    vec = bool(h.get('wide')) and n == GMEM_RUN_WORDS
++    def access4(alo, ahi):   # the 16 bytes at a physical address, as the helper read them
++        p = val(OP_CONVERT_U_TO_PTR, h['wide']['vptr'], val(OP_BITCAST, u64, val(OP_COMPOSITE_CONSTRUCT, v2, alo, ahi)))
++        return cast(val(OP_LOAD, h['wide']['vty'], p, *h['mem']), h['wide']['vty'], v4)
+     fid, plo, phi = m.new_id(), m.new_id(), m.new_id()
+     fty = m.add_type(OP_TYPE_FUNCTION_, v4, h['lo'], h['hi'])
+     E, HOT, COLD, M = m.new_id(), m.new_id(), m.new_id(), m.new_id()
+@@ -1330,8 +1397,10 @@ def _cached_load_fn(m, h, n, cache, helper, T):
+     op(OP_SELECTION_MERGE, M, 0); op(OP_BRANCH_CONDITIONAL, hit, HOT, COLD)
+     # every word in the kept entry
+     op(OP_LABEL, HOT)
+-    hv = [access(*add64(al[k], ah[k], c[4], c[5])) for k in range(n)]
+-    hr = val(OP_COMPOSITE_CONSTRUCT, v4, *hv, *[U[0]] * (4 - n))
++    if vec: hr = access4(*add64(al[0], ah[0], c[4], c[5]))
++    else:
++        hv = [access(*add64(al[k], ah[k], c[4], c[5])) for k in range(n)]
++        hr = val(OP_COMPOSITE_CONSTRUCT, v4, *hv, *[U[0]] * (4 - n))
+     op(OP_BRANCH, M)
+     # each word looked up: hint, else search; its entry kept when it holds the word
+     LH, LB, LC, LM, SB, SH, SBB, SC, SM, SMM = (m.new_id() for _ in range(10))
+@@ -1369,10 +1438,15 @@ def _cached_load_fn(m, h, n, cache, helper, T):
+         op(OP_STORE, v, val(OP_SELECT, u32, found, wv, val(OP_LOAD, u32, v)))
+     pl, ph = add64(x, y, ws[4], ws[5])
+     sink = [word(I[0], 6), word(I[0], 7)]
+-    got = access(val(OP_SELECT, u32, found, pl, sink[0]), val(OP_SELECT, u32, found, ph, sink[1]))
+-    ins.append([6 << 16 | OP_VECTOR_INSERT_DYNAMIC, v4, acc2, acc, val(OP_SELECT, u32, found, got, U[0]), k0])
++    if vec:   # the base's entry: all four words from it, as the helper read them
++        got = access4(val(OP_SELECT, u32, found, pl, sink[0]), val(OP_SELECT, u32, found, ph, sink[1]))
++        b4 = val(OP_COMPOSITE_CONSTRUCT, m.add_type(OP_TYPE_VECTOR, bty, 4), found, found, found, found)
++        ins.append([6 << 16 | OP_SELECT, v4, acc2, b4, got, z4])
++    else:
++        got = access(val(OP_SELECT, u32, found, pl, sink[0]), val(OP_SELECT, u32, found, ph, sink[1]))
++        ins.append([6 << 16 | OP_VECTOR_INSERT_DYNAMIC, v4, acc2, acc, val(OP_SELECT, u32, found, got, U[0]), k0])
+     ins.append([5 << 16 | OP_IADD, u32, k1, k0, U[1]])
+-    more2 = val(OP_ULESS_THAN, bty, k1, m.add_const(u32, n))
++    more2 = val(OP_ULESS_THAN, bty, k1, m.add_const(u32, 1 if vec else n))
+     op(OP_BRANCH, LC); op(OP_LABEL, LC); op(OP_BRANCH_CONDITIONAL, more2, LH, LM)
+     op(OP_LABEL, LM); op(OP_BRANCH, M)
+     op(OP_LABEL, M)

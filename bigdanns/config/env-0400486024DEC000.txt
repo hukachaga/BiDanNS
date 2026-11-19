@@ -1,0 +1,14 @@
+# BigDanNS: Zelda = the official app last run (2026-11-19 04:55), driver Turnip TotK Native, Full vegetation on
+DM_VK_DRIVER=/data/user/0/dev.nxnative.android.bigdanns/files/gpu_drivers/Turnip_TotK
+DM_GRAPHICS_SCALE=2
+DM_OOT_FPS_UNLOCK=1
+DM_FPS_LIMIT=30
+DM_VK_RAM_SAVER=1
+DM_OOT_DRAW_DISTANCE=300
+DM_OOT_FOG_AT_CUT=1
+DM_OOT_FOLIAGE_DISTANCE=75
+DM_OOT_LOD_SCALE=0.75
+DM_OOT_SHADOW_RANGE=500
+DM_LSFG=0
+DM_VK_PSO_ASYNC=0
+DM_VK_VEGETATION=1
