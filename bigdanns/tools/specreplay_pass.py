@@ -14,7 +14,7 @@ Here every call site becomes a few compares and one load, with no search:
     run stands (a vertex reaching more than K pools within MAX_RUNS runs gets 0 for the rest: open, not seen).
   - The first call site seeds slot 0 with that search, so a vertex whose loads all lie in one pool runs the body once.
 Every value read is the one the helper reads (same pool, same delta); a 128-bit helper call checks its base address only, as the helper did.
-Only vertex shaders whose main is one block, writing nothing but Function, Private and Output variables (the body runs again).
+Only vertex shaders whose main is one block, writing nothing but Function, Private and Output variables and reading no Private variable before writing it (the body runs again).
 
 Measured (Konkr, Adreno 750, Turnip Mesa 27, Castle Town at night, recorded route): b1f06157308e3b22 0.264 -> 0.066 us a vertex, the frame 89 -> 76 ms GPU.
 """
@@ -108,6 +108,16 @@ def transform(m, table, K=int(os.environ.get("SR_K", "4"))):
         op = x[0] & 0xffff
         if op in SIDE_EFFECT_OPS: raise Skip(f'opcode {op} in main')
         if op == OP_STORE and spv._store_class(m, mdefs, x[1]) not in (SC_FUNCTION, SC_PRIVATE, SC_OUTPUT_): raise Skip('a store to memory in main')
+    # a rerun must start from the same Private state: main reads no Private variable before it writes it (a 128-bit helper call writes its array)
+    def pbase(p):
+        while p in mdefs and mdefs[p][0] & 0xffff in (OP_ACCESS_CHAIN, 66): p = mdefs[p][3]
+        return p if p in m.vars and m.vars[p][1] == SC_PRIVATE else None
+    written = set()
+    for x in mbody:
+        op = x[0] & 0xffff
+        if op == OP_LOAD and pbase(x[3]) is not None and pbase(x[3]) not in written: raise Skip('a Private read before its write in main')
+        if op == OP_STORE and pbase(x[1]) is not None: written.add(pbase(x[1]))
+        if op == OP_FUNCTION_CALL and kinds[x[3]][0] == 'wide': written.add(kinds[x[3]][1]['priv'])
     sites = [x for x in mbody if x[0] & 0xffff == OP_FUNCTION_CALL]
     # declarations
     bty = m.add_type(OP_TYPE_BOOL)

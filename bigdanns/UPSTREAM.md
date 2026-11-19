@@ -16,10 +16,26 @@ Este arquivo reúne o que fizemos no BigDanNS e que pode servir ao Banana Native
 | A | Issue (ideia / desenvolvimento) | Leitura direta com recálculo nos vertex shaders (Turnip): Zelda 9,8 → 18,8 fps na cidade do castelo; o `cache_raw_loads` não cobre o helper de 128 bits | **publicada: [#505](https://git.eden-emu.dev/moceure/BananaNative/issues/505)** (2026-11-19) |
 | B | Issue (bug) | `[RED] save commit: cannot clear … errno=13` repetido a cada commit: 2,4 milhões de linhas, log de 457 MB, jogo travando | **publicada: [#506](https://git.eden-emu.dev/moceure/BananaNative/issues/506)** (2026-11-19) |
 | C | Comentário na PR #83 | O Turnip Mesa 27 não tem a opção `fp16` no `TU_DEBUG` | texto pronto |
-| D | PR (depois da resposta à A) | O próprio passe, em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | código no BigDanNS; antes, rodar os testes deles e testar no driver Qualcomm |
+| D | PR (depois da resposta à A) | O próprio passe, em `vk_android_spv.py`, com teste e entrada em `docs/reference/shaders.md` | a #505 foi testada por eles no driver Qualcomm (ver abaixo); falta o PR |
 | E | PR | Vida infinita do Zelda: segurar o handle de vida do Link | precisa virar uma linha do perfil (`game.tsv`) em vez de `#define` |
 
-A e B não dependem de nada: podem ir já. A D vem depois que eles responderem à A. Cada envio é público, com o nome da sua conta do git.eden-emu.dev.
+A e B foram publicadas. A D vem depois que eles responderem à A. Cada envio é público, com o nome da sua conta do git.eden-emu.dev.
+
+### Resposta à #505 (2026-11-19)
+
+Testaram no driver da Qualcomm, num AYN Odin 3 (Snapdragon 8 Elite, Adreno 830, Android 15, `V@0800.72`), com Banana Native v0.3.45 e Zelda v131072:
+
+- a reescrita da biblioteca deu o mesmo que aqui: 734 de 802 shaders, 67 pulados por terem mais de um bloco e 1 pelo helper que grava; os 734 passam no `spirv-val`;
+- na casa do Link, com o driver Qualcomm: 670 draws, GPU 16,32 ms contra 16,12, imagem idêntica pixel a pixel;
+- na casa do Link, com o Turnip `Turnip_Gen8_V39_Patched`: 673 draws, GPU 16,80 ms contra 16,46, imagem idêntica.
+
+A casa do Link não tem os moradores da cidade, então mostra que o passe é **correto** nos dois drivers e custa uns 2 % onde não ajuda; o ganho só aparece onde esse shader pesa (a cidade do castelo).
+
+Concordam em limitar a vertex shaders em linha reta: `main` de um bloco, sem gravar fora de `Function`/`Private`/`Output` e **sem ler `Private` antes de gravar**. Os fragment shaders têm derivadas implícitas, os compute/mesh/task têm barreiras e operações de subgrupo, e os geometry shaders têm `EmitVertex`.
+
+A terceira condição não estava escrita no passe. Os 734 já a cumpriam, e agora o passe a verifica (`Skip('a Private read before its write in main')`); o resultado continua 734.
+
+Próximo: o PR D, com o passe em `vk_android_spv.py`, um teste no estilo de `test_vk_gmem_cache.py` e a entrada em `docs/reference/shaders.md`. Para o custo na casa do Link, o passe pode valer só para os shaders em que a busca na tabela pesa (por exemplo, muitas chamadas de leitura direta).
 
 ---
 
