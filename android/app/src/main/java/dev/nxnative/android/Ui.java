@@ -561,7 +561,7 @@ final class Ui {
     /** The banana with a face in a leaf-green circle (Home's header) */
     static ImageView badge(Context c, int sizeDp) {
         ImageView v = new ImageView(c);
-        v.setImageDrawable(new android.graphics.drawable.InsetDrawable(c.getDrawable(R.drawable.ic_banana_happy), -0.16f));   // the banana fills more of the circle
+        v.setImageDrawable(c.getDrawable(R.drawable.bdn_face));   // BigDanNS: the project photo, already cut to a circle
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
         g.setColor(0xFF1E5B3A);

@@ -170,7 +170,7 @@ final class Prefs {
     static boolean steps(String titleId) { Profile p = Profile.of(titleId); return p != null && p.steps; }
     /** Hold 60 fps (per game, default off), for steps games at the cap of 60: one step a frame always, where the game's own mode runs two (30 fps) after a frame its work
      *  overran. A frame that runs long then plays a little slower instead of dropping to 30 (DM_FPS_HOLD60=1 at start, Native.hold60Set while it runs) */
-    static boolean fullVegetation(Context c, String titleId) { return of(c).getBoolean(gameKey("full_vegetation", titleId), Recommend.bool(rec(c, titleId, Recommend.VEGETATION), true)); }
+    static boolean fullVegetation(Context c, String titleId) { return of(c).getBoolean(gameKey("full_vegetation", titleId), true); }   // BigDanNS: Full vegetation stays on unless the player turns it off (the Qualcomm recommendation took the trees' leaves)
     static void fullVegetation(Context c, String titleId, boolean on) { of(c).edit().putBoolean(gameKey("full_vegetation", titleId), on).commit(); }
     /** Advanced › 3D scene (Game settings, a game with scene_scale rows: SceneRes; before the Resolution presets, Scene resolution): the row's name, "" for Game default (the game's own palette).
      *  Applies under Advanced only (resolutionChoice); a value from before the presets picks the preset it matches (ResPresets.current) */
@@ -503,7 +503,7 @@ final class Prefs {
         of(c).edit().putString(gameKey("mods_off", titleId), Mods.encodeOff(s)).commit();
     }
     static boolean cheatsGame(String titleId) { Profile p = Profile.of(titleId); return p != null && p.cheats; }
-    static boolean cheats(Context c, String titleId) { return cheatsGame(titleId) && of(c).getBoolean(gameKey("cheats", titleId), false); }
+    static boolean cheats(Context c, String titleId) { return cheatsGame(titleId) && of(c).getBoolean(gameKey("cheats", titleId), true); }   // BigDanNS: on by default
     static void cheats(Context c, String titleId, boolean on) { of(c).edit().putBoolean(gameKey("cheats", titleId), on).commit(); }
     /** The cheats turned on in the in-game panel, by key (Cheats.Entry.key), kept per game and written into &lt;build&gt;.enabled before each start (Cheats.install) */
     static java.util.Set<String> cheatsOn(Context c, String titleId) { return Cheats.decodeOn(of(c).getString(gameKey("cheats_on", titleId), "")); }
